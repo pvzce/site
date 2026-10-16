@@ -1,0 +1,16 @@
+/.env
+/.env.*
+!/.env.example
+/bin/
+/coverage.out
+*.log
+.DS_Store
+/data/*
+!/data/.gitkeep
+/configs/*
+!/configs/.gitkeep
+!/configs/*.example.*
+/cache/*
+!/cache/.gitkeep
+__pycache__/
+*.py[cod]

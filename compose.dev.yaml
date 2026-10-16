@@ -1,0 +1,5 @@
+# Use with compose.yaml to publish PostgreSQL for host-side development.
+services:
+  database:
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"

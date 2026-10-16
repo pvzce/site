@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+bin
+coverage.out
+*.log
+data/*
+!data/.gitkeep
+configs/*
+!configs/.gitkeep
+cache/*
+!cache/.gitkeep
+tests

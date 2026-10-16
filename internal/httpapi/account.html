@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>账户 · PvZ CE</title>
+  <style>
+    :root{font-family:system-ui,sans-serif;color:#eaf0e7;background:#122018}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px}.card{width:min(100%,480px);background:#1c2e22;border:1px solid #36553e;border-radius:20px;padding:36px}.label{font-size:12px;letter-spacing:3px;color:#9cc897;margin:0 0 28px}h1{font-size:30px;margin:0 0 14px}p{color:#bacdbd;line-height:1.7;overflow-wrap:anywhere}.button{display:inline-block;margin-top:20px;padding:13px 20px;border-radius:10px;border:0;background:#a4d68c;color:#112115;font:inherit;font-weight:600;text-decoration:none;cursor:pointer}.meta{border-top:1px solid #36553e;padding-top:18px;margin-top:22px}small{color:#8ba48f}
+  </style>
+</head>
+<body><main class="card">
+  <p class="label">PVZ CE · ACCOUNT</p>
+  {{if .Session}}
+  <h1>{{if .Session.User.Name}}{{.Session.User.Name}}{{else}}{{.Session.User.Username}}{{end}}</h1>
+  <p>你已登录本站。</p>
+  <div class="meta"><p>用户名：{{.Session.User.Username}}<br>邮箱：{{.Session.User.Email}}</p></div>
+  <form method="post" action="/auth/logout"><input type="hidden" name="csrf_token" value="{{.Session.CSRFToken}}"><button class="button" type="submit">退出登录</button></form>
+  {{else if .Enabled}}
+  <h1>登录你的账户</h1>
+  <p>通过 Casdoor 登录，进入你的 PvZ CE 账户。你也可以在登录页面创建新账户。</p>
+  <a class="button" href="/auth/login">使用 Casdoor 登录</a>
+  {{else}}
+  <h1>账户服务尚未启用</h1>
+  <p>请完成 Casdoor 配置后启用账户服务。</p>
+  {{end}}
+</main></body></html>
