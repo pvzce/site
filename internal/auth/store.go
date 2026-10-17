@@ -4,21 +4,18 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	_ "embed"
 	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"pvzce-site/internal/database"
+	"pvzce-site/internal/migrate"
 )
 
 var (
 	ErrUnauthorized = errors.New("authentication required")
 	ErrInvalidLogin = errors.New("invalid or expired login")
 )
-
-//go:embed schema.sql
-var schema string
 
 type User struct {
 	ID       int64  `json:"id"`
@@ -52,13 +49,7 @@ func NewStore(ctx context.Context, db *database.DB) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("authentication requires a database")
 	}
-	if err := db.InTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(706879122531)"); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, schema)
-		return err
-	}); err != nil {
+	if err := migrate.Apply(ctx, db); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil

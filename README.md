@@ -6,6 +6,9 @@
 
 已包含：版本化 API、健康检查、结构化日志、请求限制、优雅停机、PostgreSQL 连接池与事务、内部文件读取、Casdoor 登录 / 注册入口、持久化会话、账户页、注销、自动测试和 CI。
 
+作品发布/审核/下载与临时操作页面已接入同一后端。新增功能的完整安装、私有 S3 与 ClamAV 配置、权限初始化、API、额度及升级说明见 [作品平台说明](docs/workshop.md)；真实游戏格式与校验边界见 [包格式核对](docs/package-format.md)，验证命令和结果见 [验证记录](docs/verification-part1.md)。临时页面入口 `/projects`，业务 API `/api/v1/projects`。以下原有 `make up` 说明仍启动基础账户服务；完整作品上传环境使用新说明中的 `make workshop-init` / `make workshop-up`。
+
+
 ## 本地 Casdoor 和账户系统
 
 需要 Docker Engine、Docker Compose 和 Make。启动整个本地环境：
@@ -23,7 +26,7 @@ make up
 - 管理账户：组织 `built-in`，用户名 `pvzce-admin`
 - 初始密码：保存在 `configs/casdoor/credentials.txt`，未提交到 Git
 
-请统一使用 `localhost` 访问这些地址，确保回调地址和浏览器 Cookie 的主机一致。Casdoor 的登录页同时提供普通账户注册；用户资料和密码由 Casdoor 管理。默认内置 `admin` 被禁用，本地管理员和测试用户使用随机生成的密码。
+请统一使用 `localhost` 访问这些地址，确保回调地址和浏览器 Cookie 的主机一致。Casdoor 的登录页同时提供普通账户注册；凭据与原始身份由 Casdoor 管理；本站显示名和简介在 `/profile` 独立编辑。默认内置 `admin` 被禁用，本地管理员和测试用户使用随机生成的密码。
 
 生成文件均为 `0600`，配置目录为 `0700`。初始化命令可以重复执行，会保留原有数据库密码、客户端密钥和签名证书。Casdoor 使用合并导入，用户修改密码后不会在重启时被覆盖；`credentials.txt` 只记录初始密码。
 
@@ -269,7 +272,7 @@ defer file.Close()
 
 每个类别的相对路径都从自己的目录解析；例如配置 `settings.json` 位于 `configs/settings.json`，数据读取工具无法通过符号链接读取它。
 
-文件只供内部模块读取，没有文件下载或上传接口。
+上述 fileio 工具仍仅供内部读取。作品上传与授权下载使用独立的 workshop 服务、私有 S3、额度和扫描链路，不直接暴露 fileio 目录。
 
 新增 JSON 写接口时，使用 `decodeJSON` 检查类型、语法、未知字段和请求体大小，再校验业务字段。中间件拒绝超过上限的已知长度请求，并限制未知长度请求可读取的字节数；未知长度请求必须通过受限的 `r.Body` 读取，才能检测超限并返回 413。
 
