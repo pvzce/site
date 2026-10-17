@@ -54,6 +54,7 @@ func TestScannerFailsClosed(t *testing.T) {
 	if e == nil || result != "failed" {
 		t.Fatal("scanner timeout marked clean")
 	}
+	_ = listener.Close() // Also unblock Accept if the deadline elapsed before dialing.
 	<-done
 }
 func TestRealS3PrivacyIntegration(t *testing.T) {
