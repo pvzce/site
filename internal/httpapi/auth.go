@@ -7,7 +7,9 @@ import (
 	_ "embed"
 	"errors"
 	"html/template"
+	"io"
 	"log/slog"
+
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +21,11 @@ const sessionCookie = "pvzce_session"
 const loginCookie = "pvzce_login"
 
 type accountKey struct{}
+type uploadPartsKey struct{}
+
+func withAccount(ctx context.Context, s auth.Session) context.Context {
+	return context.WithValue(ctx, accountKey{}, s)
+}
 
 // Account returns the session installed by RequireAccount.
 func Account(ctx context.Context) (auth.Session, bool) {
@@ -56,6 +63,25 @@ func RequireAccount(service *auth.Service, next http.Handler) http.Handler {
 				}
 				csrf = r.PostForm.Get("csrf_token")
 			}
+			if csrf == "" && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") && r.Method == "POST" && uploadPath(r) {
+				parts, e := r.MultipartReader()
+				if e != nil {
+					writeError(w, r, 400, "invalid_form", "Invalid multipart body")
+					return
+				}
+				first, e := parts.NextPart()
+				if e != nil || first.FormName() != "csrf_token" || first.FileName() != "" {
+					writeError(w, r, 403, "invalid_csrf", "CSRF must be the first multipart field")
+					return
+				}
+				value, e := io.ReadAll(io.LimitReader(first, 129))
+				if e != nil || len(value) > 128 {
+					writeError(w, r, 403, "invalid_csrf", "Invalid CSRF field")
+					return
+				}
+				csrf = string(value)
+				r = r.WithContext(context.WithValue(r.Context(), uploadPartsKey{}, parts))
+			}
 			origin := r.Header.Get("Origin")
 			if (origin != "" && origin != service.Config().PublicURL) || r.Header.Get("Sec-Fetch-Site") == "cross-site" ||
 				csrf == "" || subtle.ConstantTimeCompare([]byte(csrf), []byte(session.CSRFToken)) != 1 {
@@ -63,7 +89,7 @@ func RequireAccount(service *auth.Service, next http.Handler) http.Handler {
 				return
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), accountKey{}, session)))
+		next.ServeHTTP(w, r.WithContext(withAccount(r.Context(), session)))
 	})
 }
 

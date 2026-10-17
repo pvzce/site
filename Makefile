@@ -22,7 +22,7 @@ test:
 check: vet test
 
 integration:
-	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a test database'; exit 1; }; $(GO) test -race ./internal/database ./internal/server ./internal/auth
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a test database'; exit 1; }; $(GO) test -race ./internal/database ./internal/server ./internal/auth ./internal/migrate ./internal/workshop
 
 docker-build:
 	docker build --build-arg VERSION=$(VERSION) -t pvzce-site:$(VERSION) .
@@ -41,3 +41,10 @@ db-up:
 
 db-down:
 	$(COMPOSE) -f compose.yaml -f compose.dev.yaml stop database
+
+workshop-init:
+	$(GO) run ./cmd/server init-casdoor
+	python3 scripts/init-workshop.py
+
+workshop-up:
+	$(COMPOSE) -f compose.yaml -f compose.dev.yaml -f compose.workshop.yaml up -d database casdoor s3 scanner

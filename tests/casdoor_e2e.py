@@ -31,7 +31,7 @@ def configuration():
     return values
 
 
-def login(client, values):
+def login(client, values, username="demo", password=None):
     app = values.get('APP_PUBLIC_URL', 'http://localhost:8080')
     issuer = values.get('CASDOOR_ISSUER_URL', 'http://localhost:8000')
 
@@ -53,8 +53,8 @@ def login(client, values):
     ]}
     body = {
         'application': values.get('CASDOOR_APPLICATION', 'pvzce-site'),
-        'organization': 'pvzce', 'username': 'demo',
-        'password': os.environ.get('CASDOOR_E2E_PASSWORD', values['CASDOOR_DEMO_PASSWORD']),
+        'organization': 'pvzce', 'username': username,
+        'password': password or os.environ.get('CASDOOR_E2E_PASSWORD', values['CASDOOR_DEMO_PASSWORD']),
         'type': 'code', 'signinMethod': 'Password', 'autoSignin': True, 'language': 'zh',
     }
     with send(issuer + '/api/login?' + urllib.parse.urlencode(query), json.dumps(body).encode(),
@@ -73,7 +73,7 @@ def login(client, values):
     with send(app + '/api/v1/account/me') as response:
         assert response.status == 200, 'Account session is unavailable'
         session = json.load(response)['data']
-    assert session['user']['username'] == 'demo', 'Wrong identity returned by the account API'
+    assert session['user']['username'] == username, 'Wrong identity returned by the account API'
     return send, session, callback
 
 

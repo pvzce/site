@@ -1,0 +1,46 @@
+# Local S3-compatible development storage and ClamAV; no public object hosting.
+services:
+  s3:
+    image: chrislusf/seaweedfs:4.17
+    command: ["server", "-s3", "-s3.port=9000", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data", "-ip=s3", "-master.volumeSizeLimitMB=1024"]
+    environment:
+      NO_PROXY: ${NO_PROXY:-},s3,database,casdoor,scanner,localhost,127.0.0.1
+    ports: ["127.0.0.1:9000:9000"]
+    volumes:
+      - ./configs/s3.json:/etc/seaweedfs/s3.json:ro
+      - s3_data:/data
+  scanner:
+    image: clamav/clamav:1.4
+    entrypoint: ["clamd", "--config-file=/etc/clamav/site.conf"]
+    healthcheck:
+      test: ["CMD", "clamdscan", "--config-file=/etc/clamav/site.conf", "--ping=1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    ports: ["127.0.0.1:3310:3310"]
+    volumes:
+      - ./configs/clamd.example.conf:/etc/clamav/site.conf:ro
+  backend:
+    depends_on:
+      s3:
+        condition: service_started
+      scanner:
+        condition: service_healthy
+    environment:
+      NO_PROXY: ${NO_PROXY:-},s3,database,casdoor,scanner,localhost,127.0.0.1
+      S3_ENDPOINT: s3:9000
+      S3_BUCKET: ${S3_BUCKET:?Run scripts/init-workshop.py}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?Run scripts/init-workshop.py}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?Run scripts/init-workshop.py}
+      S3_SECURE: "false"
+      DOWNLOAD_HASH_KEY: ${DOWNLOAD_HASH_KEY:?Run scripts/init-workshop.py}
+      CLAMD_ADDRESS: scanner:3310
+      UPLOAD_MAX_FILE_BYTES: ${UPLOAD_MAX_FILE_BYTES:-209715200}
+      UPLOAD_DAILY_QUOTA_BYTES: ${UPLOAD_DAILY_QUOTA_BYTES:-524288000}
+      UPLOAD_QUOTA_TIMEZONE: ${UPLOAD_QUOTA_TIMEZONE:-UTC}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+    tmpfs:
+      - /cache:rw,noexec,nosuid,nodev,size=512m,mode=0750,uid=65532,gid=65532
+volumes:
+  s3_data:

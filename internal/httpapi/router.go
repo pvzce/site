@@ -10,6 +10,7 @@ import (
 	"pvzce-site/internal/config"
 	"pvzce-site/internal/database"
 	"pvzce-site/internal/fileio"
+	"pvzce-site/internal/workshop"
 )
 
 // Dependencies are initialized once at startup and shared by business handlers.
@@ -19,12 +20,14 @@ type Dependencies struct {
 	Files    *fileio.Directories
 	Ready    func(context.Context) error
 	Auth     *auth.Service
+	Workshop *workshop.Service
 }
 
 // NewHandler is the composition point for HTTP routes and shared middleware.
 func NewHandler(cfg config.Config, logger *slog.Logger, deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	registerAccountRoutes(mux, deps.Auth, logger)
+	registerWorkshop(mux, deps)
 	info := func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]string{
@@ -49,7 +52,19 @@ func NewHandler(cfg config.Config, logger *slog.Logger, deps Dependencies) http.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "Route not found")
 	})
-	return middleware(logger, cfg.MaxBodyBytes, mux)
+	ordinary := middleware(logger, cfg.MaxBodyBytes, mux)
+	uploadLimit := int64(209715200)
+	if deps.Workshop != nil {
+		uploadLimit = deps.Workshop.Settings.MaxFile
+	}
+	uploads := middleware(logger, uploadLimit+8192, mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if uploadPath(r) {
+			uploads.ServeHTTP(w, r)
+		} else {
+			ordinary.ServeHTTP(w, r)
+		}
+	})
 }
 
 // A path-only fallback keeps method errors in the same JSON format as other API errors.

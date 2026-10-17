@@ -1,9 +1,16 @@
-ARG GO_VERSION=1.27.1
-FROM golang:${GO_VERSION}-alpine AS build
+# syntax=docker/dockerfile:1
+ARG GO_VERSION=1.27.2
+FROM golang:${GO_VERSION} AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+# The optional combined CA bundle is mounted only for this command, never persisted.
+# Restricted cloud environments may fetch an individual module from its official Git repository.
+ARG DIRECT_MODULE_DOWNLOADS=""
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca GIT_SSL_CAINFO=/run/secrets/proxy_ca; fi; \
+    if [ -n "$DIRECT_MODULE_DOWNLOADS" ]; then GOPROXY=direct go mod download "$DIRECT_MODULE_DOWNLOADS"; fi && \
+    go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 ARG VERSION=dev

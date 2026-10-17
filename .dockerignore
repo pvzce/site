@@ -12,3 +12,5 @@ configs/*
 cache/*
 !cache/.gitkeep
 tests
+
+work
