@@ -72,7 +72,11 @@ func (s *Service) Transition(ctx context.Context, uid, pid, vid int64, in Review
 			}
 			next = "draft"
 		case "approve", "reject", "remove", "restore":
-			if !oneOf(a.Role, "reviewer", "admin") || m || creator == uid {
+			own, e := reviewerConflict(ctx, tx, pid, uid)
+			if e != nil {
+				return e
+			}
+			if !oneOf(a.Role, "reviewer", "admin") || own || creator == uid {
 				return ErrForbidden
 			}
 			switch in.Action {
@@ -171,11 +175,11 @@ func (s *Service) ResolveAppeal(ctx context.Context, uid, id int64, reply string
 		if e := tx.QueryRow(ctx, `SELECT r.project_id,a.user_id,r.actor_id FROM pvzce_site.appeals a JOIN pvzce_site.reviews r ON r.id=a.review_id WHERE a.id=$1 FOR UPDATE OF a`, id).Scan(&pid, &user, &actor); e != nil {
 			return e
 		}
-		m, e := member(ctx, tx, pid, uid)
+		own, e := reviewerConflict(ctx, tx, pid, uid)
 		if e != nil {
 			return e
 		}
-		if m || user == uid || actor == uid {
+		if own || user == uid || actor == uid {
 			return ErrForbidden
 		}
 		tag, e := tx.Exec(ctx, `UPDATE pvzce_site.appeals SET state='resolved',reply=$2 WHERE id=$1 AND state='pending'`, id, reply)
@@ -226,4 +230,11 @@ func (s *Service) Audit(ctx context.Context, uid int64) (json.RawMessage, error)
 		return tx.QueryRow(ctx, `SELECT COALESCE(json_agg(a),'[]'::json) FROM (SELECT * FROM pvzce_site.audit ORDER BY id DESC LIMIT 100) a`).Scan(&raw)
 	})
 	return raw, e
+}
+
+// Historical contributors remain conflicted after collaborator removal; removing membership cannot enable self-review.
+func reviewerConflict(ctx context.Context, tx pgx.Tx, pid, uid int64) (bool, error) {
+	var conflict bool
+	e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pvzce_site.projects WHERE id=$1 AND owner_id=$2) OR EXISTS(SELECT 1 FROM pvzce_site.collaborators WHERE project_id=$1 AND user_id=$2) OR EXISTS(SELECT 1 FROM pvzce_site.versions WHERE project_id=$1 AND creator_id=$2) OR EXISTS(SELECT 1 FROM pvzce_site.files WHERE project_id=$1 AND uploader_id=$2) OR EXISTS(SELECT 1 FROM pvzce_site.project_revisions WHERE project_id=$1 AND actor_id=$2)`, pid, uid).Scan(&conflict)
+	return conflict, e
 }

@@ -10,6 +10,8 @@
 export PATH=/workspace/.pvzce-tools/go/bin:$PATH
 make workshop-init
 make workshop-up
+# 只给非 root 后端访问业务目录，不递归放宽凭据文件或 Casdoor 目录权限。
+chmod 0755 data configs
 # 等待数据库、Casdoor、S3 和 ClamAV 就绪。
 # 直接运行时加载环境并覆盖容器内地址，禁止 set -x 或打印 .env。
 set -a
@@ -79,7 +81,7 @@ Casdoor 只管理凭据和已验证 OIDC 身份；业务表 `pvzce_site.accounts
 go run ./cmd/server bootstrap-admin USER_ID
 ```
 
-该命令只在本站还没有管理员时成功，写审计。不提供公开 HTTP 初始化入口。此后仅管理员通过管理接口授权角色或限制账号；不允许修改自己的角色/限制状态。Casdoor isAdmin 不映射本站管理员。审核人员和管理员都不能审核其拥有、协作或创建的资源；申诉须由非原处置人、非作者的独立审核人员处理。
+该命令只在本站还没有管理员时成功，写审计。不提供公开 HTTP 初始化入口。此后仅管理员通过管理接口授权角色或限制账号；不允许修改自己的角色/限制状态。Casdoor isAdmin 不映射本站管理员。审核人员和管理员都不能审核其拥有、协作或曾创建/上传/编辑的资源，移除协作者关系不会解除历史贡献者的利益冲突；申诉须由非原处置人、非作者的独立审核人员处理。
 
 ## 状态、策略与历史
 

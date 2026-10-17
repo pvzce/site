@@ -100,9 +100,6 @@ func run() error {
 			return e
 		}
 	}
-	if works != nil {
-		go works.Maintenance(ctx, logger)
-	}
 	files, err := fileio.NewDirectories(cfg.Files)
 	if err != nil {
 		return err
@@ -120,6 +117,9 @@ func run() error {
 		}
 		defer accounts.Close()
 		logger.Info("Casdoor authentication initialized")
+	}
+	if works != nil {
+		go works.Maintenance(ctx, logger)
 	}
 	return server.New(cfg, logger, httpapi.Dependencies{Database: db, Files: files, Auth: accounts, Workshop: works}).Run(ctx)
 }

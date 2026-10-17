@@ -249,6 +249,23 @@ func TestWorkshopLifecycleIntegration(t *testing.T) {
 	transition(t, s, owner, pid, vid, "resume")
 	transition(t, s, owner, pid, vid, "submit")
 	transition(t, s, reviewer, pid, vid, "approve")
+	// A former contributor cannot remove membership to become an independent reviewer.
+	if e := s.Collaborator(ctx, owner, pid, ids[5], false); e != nil {
+		t.Fatal(e)
+	}
+	_ = mustVersion(t, s, ids[5], pid)
+	if e := s.Collaborator(ctx, owner, pid, ids[5], true); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Profile(ctx, ids[5]); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.DB.Exec(ctx, `UPDATE pvzce_site.accounts SET role='reviewer' WHERE user_id=$1`, ids[5]); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.Transition(ctx, ids[5], pid, 0, ReviewInput{Action: "remove", Reason: "former contributor"}); !errors.Is(e, ErrForbidden) {
+		t.Fatal("former contributor self-review allowed", e)
+	}
 	// Uploads cannot replace a published file even using a fresh idempotency key.
 	f := archive(t, dataFiles())
 	b, _ := os.ReadFile(f.Name())

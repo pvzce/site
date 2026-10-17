@@ -416,7 +416,7 @@ func (s *Service) ReviewFile(ctx context.Context, uid, id int64) (File, io.ReadC
 		if e := scanFile(tx.QueryRow(ctx, `SELECT `+fileCols+` FROM pvzce_site.files f WHERE f.id=$1`, id), &out); e != nil {
 			return e
 		}
-		m, e := member(ctx, tx, out.ProjectID, uid)
+		m, e := reviewerConflict(ctx, tx, out.ProjectID, uid)
 		if e != nil {
 			return e
 		}

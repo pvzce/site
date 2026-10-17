@@ -12,6 +12,12 @@ services:
   scanner:
     image: clamav/clamav:1.4
     entrypoint: ["clamd", "--config-file=/etc/clamav/site.conf"]
+    healthcheck:
+      test: ["CMD", "clamdscan", "--config-file=/etc/clamav/site.conf", "--ping=1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
     ports: ["127.0.0.1:3310:3310"]
     volumes:
       - ./configs/clamd.example.conf:/etc/clamav/site.conf:ro
@@ -20,7 +26,7 @@ services:
       s3:
         condition: service_started
       scanner:
-        condition: service_started
+        condition: service_healthy
     environment:
       NO_PROXY: ${NO_PROXY:-},s3,database,casdoor,scanner,localhost,127.0.0.1
       S3_ENDPOINT: s3:9000
