@@ -50,7 +50,7 @@ func registerWorkshopPages(mux *http.ServeMux, deps Dependencies, public, protec
 	public("GET /projects", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		page, _ := strconv.Atoi(q.Get("page"))
-		d, e := s.List(r.Context(), requestUser(r), workshop.Filter{Search: q.Get("q"), Kind: q.Get("kind"), Tag: q.Get("tag"), GameVersion: q.Get("game_version"), Sort: q.Get("sort"), Page: page})
+		d, e := s.List(r.Context(), requestUser(r), workshop.Filter{Search: q.Get("q"), Kind: q.Get("kind"), Tag: q.Get("tag"), GameVersion: q.Get("game_version"), Sort: q.Get("sort"), Page: page, IncludeSuggestive: q.Get("include_suggestive") == "1"})
 		if e != nil {
 			businessError(w, r, e)
 			return
@@ -69,7 +69,7 @@ func registerWorkshopPages(mux *http.ServeMux, deps Dependencies, public, protec
 		pageDone(w, r, "/projects/"+strconv.FormatInt(id, 10), e)
 	})
 	public("GET /projects/{id}", func(w http.ResponseWriter, r *http.Request) {
-		d, e := s.Detail(r.Context(), requestUser(r), pathID(r, "id"))
+		d, e := s.DetailContent(r.Context(), requestUser(r), pathID(r, "id"), communityPageInput(r).IncludeSuggestive)
 		if e != nil {
 			businessError(w, r, e)
 			return
@@ -77,7 +77,7 @@ func registerWorkshopPages(mux *http.ServeMux, deps Dependencies, public, protec
 		renderWorkshop(w, r, "detail", d)
 	})
 	protect("GET /projects/{id}/edit", func(w http.ResponseWriter, r *http.Request) {
-		d, e := s.Detail(r.Context(), requestUser(r), pathID(r, "id"))
+		d, e := s.DetailContent(r.Context(), requestUser(r), pathID(r, "id"), communityPageInput(r).IncludeSuggestive)
 		if e != nil {
 			businessError(w, r, e)
 			return
@@ -133,7 +133,7 @@ func registerWorkshopPages(mux *http.ServeMux, deps Dependencies, public, protec
 	protect("POST /projects/{id}/collaborators", func(w http.ResponseWriter, r *http.Request) {
 		pageDone(w, r, "/projects/"+r.PathValue("id"), s.Collaborator(r.Context(), requestUser(r), pathID(r, "id"), formInt(r, "user_id"), r.FormValue("remove") == "true"))
 	})
-	protect("POST /projects/{id}/upload", func(w http.ResponseWriter, r *http.Request) {
+	uploadForm := func(w http.ResponseWriter, r *http.Request) {
 		parts, ok := r.Context().Value(uploadPartsKey{}).(*multipart.Reader)
 		if !ok {
 			businessError(w, r, workshop.ErrInvalid)
@@ -141,9 +141,14 @@ func registerWorkshopPages(mux *http.ServeMux, deps Dependencies, public, protec
 		}
 		_ = http.NewResponseController(w).SetReadDeadline(s.ReceiveDeadline())
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(15 * time.Minute))
+		projectID, feedbackID := pathID(r, "id"), int64(0)
+		if strings.HasPrefix(r.URL.Path, "/feedback/") {
+			feedbackID = projectID
+			projectID = 0
+		}
 		fields := map[string]string{}
 		total := 0
-		for i := 0; i < 8; i++ {
+		for i := 0; i < 12; i++ {
 			part, e := parts.NextPart()
 			if e != nil {
 				businessError(w, r, workshop.ErrInvalid)
@@ -157,7 +162,7 @@ func registerWorkshopPages(mux *http.ServeMux, deps Dependencies, public, protec
 				}
 				vid, _ := strconv.ParseInt(fields["version_id"], 10, 64)
 				size, _ := strconv.ParseInt(fields["size"], 10, 64)
-				d, e := s.Upload(r.Context(), requestUser(r), workshop.UploadInput{ProjectID: pathID(r, "id"), VersionID: vid, Purpose: fields["purpose"], Filename: part.FileName(), ExpectedSHA256: fields["sha256"], IdempotencyKey: fields["key"], IP: ip, Size: size}, part)
+				d, e := s.Upload(r.Context(), requestUser(r), workshop.UploadInput{ProjectID: projectID, FeedbackID: feedbackID, Public: fields["public"] == "1", ContentLabel: fields["content_label"], VersionID: vid, Purpose: fields["purpose"], Filename: part.FileName(), ExpectedSHA256: fields["sha256"], IdempotencyKey: fields["key"], IP: ip, Size: size}, part)
 				if e != nil {
 					businessError(w, r, e)
 					return
@@ -182,7 +187,9 @@ func registerWorkshopPages(mux *http.ServeMux, deps Dependencies, public, protec
 			fields[part.FormName()] = string(b)
 		}
 		businessError(w, r, workshop.ErrInvalid)
-	})
+	}
+	protect("POST /projects/{id}/upload", uploadForm)
+	protect("POST /feedback/{id}/upload", uploadForm)
 	protect("POST /files/rescan", func(w http.ResponseWriter, r *http.Request) {
 		e := s.RetryScan(r.Context(), requestUser(r), formInt(r, "file_id"))
 		if e != nil {

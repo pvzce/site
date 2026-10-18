@@ -86,7 +86,25 @@ type Scanner interface {
 // Clamd streams INSTREAM to a configured, private ClamAV daemon. Any non-OK result fails closed.
 type Clamd struct{ Address string }
 
+// A positive control catches degraded ClamAV installations that answer OK after an internal
+// temporary-directory failure. A clean upload is accepted only when the same service can
+// still detect the standard inert EICAR test signature. Never execute either stream.
+const scannerPositiveControl = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+
 func (c Clamd) Scan(ctx context.Context, r io.Reader) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	result, e := c.scanStream(ctx, r)
+	if e != nil || result != "clean" {
+		return result, e
+	}
+	control, e := c.scanStream(ctx, strings.NewReader(scannerPositiveControl))
+	if e != nil || control != "infected" {
+		return "failed", ErrUnavailable
+	}
+	return "clean", nil
+}
+func (c Clamd) scanStream(ctx context.Context, r io.Reader) (string, error) {
 	if c.Address == "" {
 		return "failed", ErrUnavailable
 	}

@@ -61,6 +61,39 @@ func TestUpgradeLegacyAndChecksumIntegration(t *testing.T) {
 	if e := db.QueryRow(ctx, `INSERT INTO pvzce_auth.users(issuer,subject,name) VALUES('legacy','existing-user','Preserved profile') RETURNING id`).Scan(&uid); e != nil {
 		t.Fatal(e)
 	}
+
+	// Reproduce a populated Part 1 installation, then apply only the new forward migrations.
+	if _, e := db.Exec(ctx, `CREATE TABLE public.site_migrations(name text PRIMARY KEY,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())`); e != nil {
+		t.Fatal(e)
+	}
+	for _, n := range []string{"001_auth.sql", "002_workshop.sql", "003_history_policy.sql", "004_search_indexes.sql"} {
+		name := "sql/" + n
+		body, e := migrations.ReadFile(name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if n != "001_auth.sql" {
+			if _, e := db.Exec(ctx, string(body)); e != nil {
+				t.Fatal(e)
+			}
+		}
+		if _, e := db.Exec(ctx, `INSERT INTO public.site_migrations(name,checksum) VALUES($1,$2)`, name, fmt.Sprintf("%x", sha256.Sum256(body))); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var pid, vid, fid int64
+	if _, e := db.Exec(ctx, `INSERT INTO pvzce_site.accounts(user_id) VALUES($1)`, uid); e != nil {
+		t.Fatal(e)
+	}
+	if e := db.QueryRow(ctx, `INSERT INTO pvzce_site.projects(owner_id,slug,title,kind,description,license,state) VALUES($1,'preserved','Preserved','datapack','Existing package','MIT','published') RETURNING id`, uid).Scan(&pid); e != nil {
+		t.Fatal(e)
+	}
+	if e := db.QueryRow(ctx, `INSERT INTO pvzce_site.versions(project_id,creator_id,number,changelog,channel,state) VALUES($1,$2,'1.0','history','stable','published') RETURNING id`, pid, uid).Scan(&vid); e != nil {
+		t.Fatal(e)
+	}
+	if e := db.QueryRow(ctx, `INSERT INTO pvzce_site.files(project_id,version_id,uploader_id,purpose,object_key,filename,size,sha256,scan_state,validation_state) VALUES($1,$2,$3,'package','private/existing','existing.zip',123,'preserved-hash','clean','valid') RETURNING id`, pid, vid, uid).Scan(&fid); e != nil {
+		t.Fatal(e)
+	}
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
@@ -74,12 +107,17 @@ func TestUpgradeLegacyAndChecksumIntegration(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
+	var hash, state string
+	var safety bool
+	if e := db.QueryRow(ctx, `SELECT sha256,content_state,safety_quarantined FROM pvzce_site.files WHERE id=$1`, fid).Scan(&hash, &state, &safety); e != nil || hash != "preserved-hash" || state != "published" || safety {
+		t.Fatal("existing published file lost during upgrade", e)
+	}
 	var nameValue string
 	if e := db.QueryRow(ctx, `SELECT name FROM pvzce_auth.users WHERE id=$1`, uid).Scan(&nameValue); e != nil || nameValue != "Preserved profile" {
 		t.Fatal("legacy account lost", e)
 	}
 	var count int
-	if e := db.QueryRow(ctx, `SELECT count(*) FROM public.site_migrations`).Scan(&count); e != nil || count != 4 {
+	if e := db.QueryRow(ctx, `SELECT count(*) FROM public.site_migrations`).Scan(&count); e != nil || count != len(migrationNames()) {
 		t.Fatal("migration count", count, e)
 	}
 	if _, e := db.Exec(ctx, `UPDATE public.site_migrations SET checksum='tampered' WHERE name='sql/001_auth.sql'`); e != nil {
@@ -95,4 +133,13 @@ func TestUpgradeLegacyAndChecksumIntegration(t *testing.T) {
 	if e := Apply(ctx, db); e != nil {
 		t.Fatal(e)
 	}
+}
+
+func migrationNames() []string {
+	files, _ := migrations.ReadDir("sql")
+	names := []string{}
+	for _, f := range files {
+		names = append(names, f.Name())
+	}
+	return names
 }

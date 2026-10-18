@@ -74,7 +74,7 @@ func registerWorkshop(mux *http.ServeMux, deps Dependencies) {
 		q := r.URL.Query()
 		page, _ := strconv.Atoi(q.Get("page"))
 		size, _ := strconv.Atoi(q.Get("size"))
-		data, e := s.List(r.Context(), requestUser(r), workshop.Filter{Search: q.Get("q"), Kind: q.Get("kind"), Tag: q.Get("tag"), GameVersion: q.Get("game_version"), Sort: q.Get("sort"), Page: page, Size: size})
+		data, e := s.List(r.Context(), requestUser(r), workshop.Filter{Search: q.Get("q"), Kind: q.Get("kind"), Tag: q.Get("tag"), GameVersion: q.Get("game_version"), Sort: q.Get("sort"), Page: page, Size: size, IncludeSuggestive: q.Get("include_suggestive") == "1"})
 		businessResult(w, r, data, e)
 	})
 	protect("GET /api/v1/author/projects", func(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +83,7 @@ func registerWorkshop(mux *http.ServeMux, deps Dependencies) {
 		businessResult(w, r, data, e)
 	})
 	public("GET /api/v1/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
-		d, e := s.Detail(r.Context(), requestUser(r), pathID(r, "id"))
+		d, e := s.DetailContent(r.Context(), requestUser(r), pathID(r, "id"), communityPageInput(r).IncludeSuggestive)
 		businessResult(w, r, d, e)
 	})
 	public("GET /api/v1/game-versions", func(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +206,7 @@ func registerWorkshop(mux *http.ServeMux, deps Dependencies) {
 			businessError(w, r, e)
 			return
 		}
-		f, reader, e := s.Download(r.Context(), requestUser(r), pathID(r, "file"), ip, r.Method == "HEAD")
+		f, reader, e := s.DownloadContent(r.Context(), requestUser(r), pathID(r, "file"), ip, r.Method == "HEAD", communityPageInput(r).IncludeSuggestive)
 		if e != nil {
 			businessError(w, r, e)
 			return
@@ -243,7 +243,7 @@ func registerWorkshop(mux *http.ServeMux, deps Dependencies) {
 		businessResult(w, r, nil, s.RetryScan(r.Context(), requestUser(r), pathID(r, "file")))
 	})
 	public("GET /api/v1/projects/{id}/versions/{version}", func(w http.ResponseWriter, r *http.Request) {
-		d, e := s.Detail(r.Context(), requestUser(r), pathID(r, "id"))
+		d, e := s.DetailContent(r.Context(), requestUser(r), pathID(r, "id"), communityPageInput(r).IncludeSuggestive)
 		if e != nil {
 			businessError(w, r, e)
 			return
@@ -296,14 +296,15 @@ func registerWorkshop(mux *http.ServeMux, deps Dependencies) {
 		businessResult(w, r, nil, s.ManageAccount(r.Context(), requestUser(r), pathID(r, "user"), in.Role, in.Status, in.Reason))
 	})
 	protect("GET /api/v1/admin/audit", func(w http.ResponseWriter, r *http.Request) {
-		d, e := s.Audit(r.Context(), requestUser(r))
+		d, e := s.AuditPage(r.Context(), requestUser(r), communityPageInput(r), r.URL.Query().Get("action"))
 		businessResult(w, r, d, e)
 	})
 	registerWorkshopPages(mux, deps, public, protect)
+	registerCommunity(mux, deps, public, protect)
 }
 func uploadPath(r *http.Request) bool {
 	p := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	return (r.Method == "PUT" && len(p) == 6 && p[0] == "api" && p[1] == "v1" && p[2] == "projects" && p[4] == "uploads") || (r.Method == "POST" && len(p) == 3 && p[0] == "projects" && p[2] == "upload")
+	return (r.Method == "PUT" && len(p) == 6 && p[0] == "api" && p[1] == "v1" && (p[2] == "projects" || p[2] == "feedback") && p[4] == "uploads") || (r.Method == "POST" && len(p) == 3 && (p[0] == "projects" || p[0] == "feedback") && p[2] == "upload")
 }
 func jsonPretty(v any) string {
 	b, e := json.MarshalIndent(v, "", "  ")

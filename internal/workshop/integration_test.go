@@ -89,6 +89,17 @@ func testService(t *testing.T) (*Service, []int64) {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		queries := []string{
+			`DELETE FROM pvzce_site.content_appeals WHERE user_id=ANY($1)`,
+			`DELETE FROM pvzce_site.case_appeals WHERE user_id=ANY($1)`,
+			`DELETE FROM pvzce_site.case_evidence WHERE case_id IN(SELECT id FROM pvzce_site.cases WHERE reporter_id=ANY($1))`,
+			`DELETE FROM pvzce_site.case_events WHERE actor_id=ANY($1)`,
+			`DELETE FROM pvzce_site.cases WHERE reporter_id=ANY($1)`,
+			`DELETE FROM pvzce_site.notifications WHERE user_id=ANY($1)`,
+			`DELETE FROM pvzce_site.content_actions WHERE actor_id=ANY($1)`,
+			`DELETE FROM pvzce_site.moderation_decisions WHERE comment_id IN(SELECT id FROM pvzce_site.comments WHERE user_id=ANY($1))`,
+			`DELETE FROM pvzce_site.comments WHERE user_id=ANY($1)`,
+			`DELETE FROM pvzce_site.ratings WHERE user_id=ANY($1)`,
+
 			`DELETE FROM pvzce_site.downloads WHERE file_id IN (SELECT id FROM pvzce_site.files WHERE uploader_id=ANY($1))`,
 			`DELETE FROM pvzce_site.appeals WHERE user_id=ANY($1)`,
 			`DELETE FROM pvzce_site.reviews WHERE actor_id=ANY($1)`,
@@ -96,6 +107,7 @@ func testService(t *testing.T) (*Service, []int64) {
 			`UPDATE pvzce_site.projects SET icon_file_id=NULL WHERE owner_id=ANY($1)`,
 			`DELETE FROM pvzce_site.uploads WHERE user_id=ANY($1)`,
 			`DELETE FROM pvzce_site.files WHERE uploader_id=ANY($1)`,
+			`DELETE FROM pvzce_site.feedback WHERE reporter_id=ANY($1)`,
 			`DELETE FROM pvzce_site.dependencies WHERE version_id IN (SELECT id FROM pvzce_site.versions WHERE creator_id=ANY($1))`,
 			`DELETE FROM pvzce_site.version_compatibility WHERE version_id IN (SELECT id FROM pvzce_site.versions WHERE creator_id=ANY($1))`,
 			`DELETE FROM pvzce_site.versions WHERE creator_id=ANY($1)`,

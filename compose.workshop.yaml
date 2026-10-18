@@ -12,6 +12,8 @@ services:
   scanner:
     image: clamav/clamav:1.4
     entrypoint: ["clamd", "--config-file=/etc/clamav/site.conf"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1g,mode=1777
     healthcheck:
       test: ["CMD", "clamdscan", "--config-file=/etc/clamav/site.conf", "--ping=1"]
       interval: 10s
@@ -36,6 +38,8 @@ services:
       S3_SECURE: "false"
       DOWNLOAD_HASH_KEY: ${DOWNLOAD_HASH_KEY:?Run scripts/init-workshop.py}
       CLAMD_ADDRESS: scanner:3310
+      MODERATION_ENDPOINT: ${MODERATION_ENDPOINT:-}
+      MODERATION_API_KEY: ${MODERATION_API_KEY:-}
       UPLOAD_MAX_FILE_BYTES: ${UPLOAD_MAX_FILE_BYTES:-209715200}
       UPLOAD_DAILY_QUOTA_BYTES: ${UPLOAD_DAILY_QUOTA_BYTES:-524288000}
       UPLOAD_QUOTA_TIMEZONE: ${UPLOAD_QUOTA_TIMEZONE:-UTC}

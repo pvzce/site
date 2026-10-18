@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"io"
 	"net"
 	"net/http"
@@ -133,4 +134,45 @@ func TestS3PublicPolicyRejected(t *testing.T) {
 	if _, e := NewS3(context.Background(), s); e == nil {
 		t.Fatal("bucket with policy was accepted")
 	}
+}
+
+func TestClamAVCleanWithoutPositiveControlFailsClosed(t *testing.T) {
+	listener, e := net.Listen("tcp", "127.0.0.1:0")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2; i++ {
+			conn, e := listener.Accept()
+			if e != nil {
+				return
+			}
+			_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+			command := make([]byte, 10)
+			_, _ = io.ReadFull(conn, command)
+			var size [4]byte
+			for {
+				if _, e := io.ReadFull(conn, size[:]); e != nil {
+					break
+				}
+				n := binary.BigEndian.Uint32(size[:])
+				if n == 0 {
+					break
+				}
+				if _, e := io.CopyN(io.Discard, conn, int64(n)); e != nil {
+					break
+				}
+			}
+			_, _ = io.WriteString(conn, "stream: OK\x00")
+			conn.Close()
+		}
+	}()
+	verdict, e := (Clamd{Address: listener.Addr().String()}).Scan(context.Background(), strings.NewReader("harmless"))
+	if e == nil || verdict != "failed" {
+		t.Fatal("degraded scanner claimed clean without detecting control")
+	}
+	<-done
 }
