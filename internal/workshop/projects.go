@@ -150,6 +150,14 @@ func (s *Service) Collaborator(ctx context.Context, uid, pid, target int64, remo
 		if e != nil {
 			return conflict(e)
 		}
+		if !remove {
+			if _, e := tx.Exec(ctx, `UPDATE pvzce_site.ratings SET voided=true,updated_at=now() WHERE project_id=$1 AND user_id=$2`, pid, target); e != nil {
+				return e
+			}
+			if e := refreshRating(ctx, tx, pid); e != nil {
+				return e
+			}
+		}
 		return audit(ctx, tx, uid, "collaborator.change", fmt.Sprint(pid), fmt.Sprintf("user=%d remove=%t", target, remove))
 	})
 }
@@ -166,9 +174,10 @@ type VersionInput struct {
 	Dependencies []Dependency `json:"dependencies"`
 }
 type Version struct {
-	ID        int64 `json:"id"`
-	ProjectID int64 `json:"project_id"`
-	CreatorID int64 `json:"creator_id"`
+	ContentLabel string `json:"content_label"`
+	ID           int64  `json:"id"`
+	ProjectID    int64  `json:"project_id"`
+	CreatorID    int64  `json:"creator_id"`
 	VersionInput
 	State     string    `json:"state"`
 	Downloads int64     `json:"downloads"`
@@ -227,6 +236,7 @@ func (s *Service) CreateVersion(ctx context.Context, uid, pid int64, in VersionI
 }
 
 type Filter struct {
+	IncludeSuggestive                    bool
 	Search, Kind, Tag, GameVersion, Sort string
 	Page, Size                           int
 	Mine                                 bool
@@ -255,8 +265,8 @@ func (s *Service) List(ctx context.Context, uid int64, f Filter) (ProjectPage, e
 	if order == "" {
 		return ProjectPage{}, ErrInvalid
 	}
-	where := ` WHERE (($1::boolean AND (p.owner_id=$2 OR EXISTS(SELECT 1 FROM pvzce_site.collaborators c WHERE c.project_id=p.id AND c.user_id=$2))) OR (NOT $1 AND p.state='published' AND p.content_label='general')) AND ($3='' OR to_tsvector('simple',p.title||' '||p.description) @@ plainto_tsquery('simple',$3) OR p.title ILIKE '%'||$3||'%' OR p.description ILIKE '%'||$3||'%') AND ($4='' OR p.kind=$4) AND ($5='' OR $5=ANY(p.tags)) AND ($6='' OR EXISTS(SELECT 1 FROM pvzce_site.versions v JOIN pvzce_site.version_compatibility c ON c.version_id=v.id WHERE v.project_id=p.id AND v.state='published' AND c.game_version=$6))`
-	args := []any{f.Mine, uid, f.Search, f.Kind, f.Tag, f.GameVersion}
+	where := ` WHERE (($1::boolean AND (p.owner_id=$2 OR EXISTS(SELECT 1 FROM pvzce_site.collaborators c WHERE c.project_id=p.id AND c.user_id=$2))) OR (NOT $1 AND p.state='published' AND (p.content_label='general' OR $7))) AND ($3='' OR to_tsvector('simple',p.title||' '||p.description) @@ plainto_tsquery('simple',$3) OR p.title ILIKE '%'||$3||'%' OR p.description ILIKE '%'||$3||'%') AND ($4='' OR p.kind=$4) AND ($5='' OR $5=ANY(p.tags)) AND ($6='' OR EXISTS(SELECT 1 FROM pvzce_site.versions v JOIN pvzce_site.version_compatibility c ON c.version_id=v.id WHERE v.project_id=p.id AND v.state='published' AND c.game_version=$6))`
+	args := []any{f.Mine, uid, f.Search, f.Kind, f.Tag, f.GameVersion, f.IncludeSuggestive}
 	out := ProjectPage{Items: []Project{}, Page: f.Page, Size: f.Size}
 	e := s.DB.InTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if f.Mine {
@@ -267,7 +277,7 @@ func (s *Service) List(ctx context.Context, uid int64, f Filter) (ProjectPage, e
 		if e := tx.QueryRow(ctx, `SELECT count(*) FROM pvzce_site.projects p`+where, args...).Scan(&out.Total); e != nil {
 			return e
 		}
-		rows, e := tx.Query(ctx, `SELECT `+projectCols+` FROM pvzce_site.projects p`+where+` ORDER BY `+order+` LIMIT $7 OFFSET $8`, append(args, f.Size, (f.Page-1)*f.Size)...)
+		rows, e := tx.Query(ctx, `SELECT `+projectCols+` FROM pvzce_site.projects p`+where+` ORDER BY `+order+` LIMIT $8 OFFSET $9`, append(args, f.Size, (f.Page-1)*f.Size)...)
 		if e != nil {
 			return e
 		}
@@ -293,6 +303,9 @@ type Detail struct {
 }
 
 func (s *Service) Detail(ctx context.Context, uid, pid int64) (Detail, error) {
+	return s.DetailContent(ctx, uid, pid, false)
+}
+func (s *Service) DetailContent(ctx context.Context, uid, pid int64, include bool) (Detail, error) {
 	out := Detail{Versions: []Version{}, Files: []File{}, Collaborators: []int64{}, Reviews: json.RawMessage(`[]`)}
 	e := s.DB.InTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		p, e := scanProject(tx.QueryRow(ctx, `SELECT `+projectCols+` FROM pvzce_site.projects p WHERE p.id=$1`, pid))
@@ -302,7 +315,7 @@ func (s *Service) Detail(ctx context.Context, uid, pid int64) (Detail, error) {
 		out.Project = p
 		privileged := false
 		if uid != 0 {
-			a, e := s.actor(ctx, tx, uid)
+			a, e := s.identity(ctx, tx, uid)
 			if e != nil {
 				return e
 			}
@@ -310,19 +323,19 @@ func (s *Service) Detail(ctx context.Context, uid, pid int64) (Detail, error) {
 			if e != nil {
 				return e
 			}
-			privileged = m || oneOf(a.Role, "reviewer", "admin")
+			privileged = m || isStaff(a)
 		}
-		if p.State != "published" && !privileged {
+		if (p.State != "published" || (p.ContentLabel != "general" && !include)) && !privileged {
 			return ErrNotFound
 		}
-		rows, e := tx.Query(ctx, `SELECT v.id,v.project_id,v.creator_id,v.number,v.changelog,v.channel,v.state,v.downloads,v.created_at,ARRAY(SELECT game_version FROM pvzce_site.version_compatibility WHERE version_id=v.id),COALESCE((SELECT json_agg(json_build_object('version_id',target_version_id,'kind',kind)) FROM pvzce_site.dependencies WHERE version_id=v.id),'[]'::json) FROM pvzce_site.versions v WHERE v.project_id=$1 AND ($2 OR v.state='published') ORDER BY created_at DESC,id DESC`, pid, privileged)
+		rows, e := tx.Query(ctx, `SELECT v.id,v.project_id,v.creator_id,v.number,v.changelog,v.channel,v.state,v.downloads,v.created_at,v.content_label,ARRAY(SELECT game_version FROM pvzce_site.version_compatibility WHERE version_id=v.id),COALESCE((SELECT json_agg(json_build_object('version_id',target_version_id,'kind',kind)) FROM pvzce_site.dependencies WHERE version_id=v.id),'[]'::json) FROM pvzce_site.versions v WHERE v.project_id=$1 AND ($2 OR (v.state='published' AND (v.content_label='general' OR $3))) ORDER BY created_at DESC,id DESC`, pid, privileged, include)
 		if e != nil {
 			return e
 		}
 		for rows.Next() {
 			var v Version
 			var deps []byte
-			if e := rows.Scan(&v.ID, &v.ProjectID, &v.CreatorID, &v.Number, &v.Changelog, &v.Channel, &v.State, &v.Downloads, &v.CreatedAt, &v.GameVersions, &deps); e != nil {
+			if e := rows.Scan(&v.ID, &v.ProjectID, &v.CreatorID, &v.Number, &v.Changelog, &v.Channel, &v.State, &v.Downloads, &v.CreatedAt, &v.ContentLabel, &v.GameVersions, &deps); e != nil {
 				rows.Close()
 				return e
 			}
@@ -336,7 +349,7 @@ func (s *Service) Detail(ctx context.Context, uid, pid int64) (Detail, error) {
 		if rows.Err() != nil {
 			return rows.Err()
 		}
-		files, e := tx.Query(ctx, `SELECT f.id,f.project_id,f.version_id,f.purpose,f.filename,f.size,f.sha256,f.scan_state,f.validation_state,f.metadata FROM pvzce_site.files f LEFT JOIN pvzce_site.versions v ON v.id=f.version_id WHERE f.project_id=$1 AND ($2 OR (f.scan_state='clean' AND f.validation_state='valid' AND ((f.purpose='package' AND v.state='published') OR (f.purpose='icon' AND f.id=$3)))) ORDER BY f.id`, pid, privileged, p.IconID)
+		files, e := tx.Query(ctx, `SELECT f.id,f.project_id,f.version_id,f.purpose,f.filename,f.size,f.sha256,f.scan_state,f.validation_state,f.metadata FROM pvzce_site.files f LEFT JOIN pvzce_site.versions v ON v.id=f.version_id WHERE f.project_id=$1 AND ($2 OR (f.scan_state='clean' AND f.validation_state='valid' AND NOT f.safety_quarantined AND f.content_state='published' AND (f.content_label='general' OR $4) AND ((f.purpose='package' AND v.state='published' AND (v.content_label='general' OR $4)) OR (f.purpose='icon' AND f.id=$3)))) ORDER BY f.id`, pid, privileged, p.IconID, include)
 		if e != nil {
 			return e
 		}
@@ -353,7 +366,7 @@ func (s *Service) Detail(ctx context.Context, uid, pid int64) (Detail, error) {
 			return files.Err()
 		}
 		if privileged {
-			if e := tx.QueryRow(ctx, `SELECT COALESCE(json_agg(r ORDER BY r.id DESC),'[]'::json) FROM (SELECT id,version_id,actor_id,action,reason,from_state,to_state,created_at FROM pvzce_site.reviews WHERE project_id=$1) r`, pid).Scan(&out.Reviews); e != nil {
+			if e := tx.QueryRow(ctx, `SELECT COALESCE(json_agg(r ORDER BY r.id DESC),'[]'::json) FROM (SELECT id,version_id,actor_id,action,reason,from_state,to_state,category,policy_version,created_at FROM pvzce_site.reviews WHERE project_id=$1) r`, pid).Scan(&out.Reviews); e != nil {
 				return e
 			}
 		}
@@ -393,7 +406,7 @@ func (s *Service) SetIcon(ctx context.Context, uid, pid, fileID int64) error {
 		if !oneOf(state, "draft", "rejected", "published") {
 			return ErrInvalid
 		}
-		tag, e := tx.Exec(ctx, `UPDATE pvzce_site.projects SET icon_file_id=$2,state='draft',updated_at=now() WHERE id=$1 AND EXISTS(SELECT 1 FROM pvzce_site.files WHERE id=$2 AND project_id=$1 AND purpose='icon' AND scan_state='clean' AND validation_state='valid')`, pid, fileID)
+		tag, e := tx.Exec(ctx, `UPDATE pvzce_site.projects SET icon_file_id=$2,state='draft',updated_at=now() WHERE id=$1 AND EXISTS(SELECT 1 FROM pvzce_site.files WHERE id=$2 AND project_id=$1 AND purpose='icon' AND scan_state='clean' AND validation_state='valid' AND NOT safety_quarantined AND content_state='published')`, pid, fileID)
 		if e != nil {
 			return e
 		}

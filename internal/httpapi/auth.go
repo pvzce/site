@@ -63,7 +63,7 @@ func RequireAccount(service *auth.Service, next http.Handler) http.Handler {
 				}
 				csrf = r.PostForm.Get("csrf_token")
 			}
-			if csrf == "" && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") && r.Method == "POST" && uploadPath(r) {
+			if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") && r.Method == "POST" && uploadPath(r) {
 				parts, e := r.MultipartReader()
 				if e != nil {
 					writeError(w, r, 400, "invalid_form", "Invalid multipart body")

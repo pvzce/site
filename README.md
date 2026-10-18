@@ -6,7 +6,7 @@
 
 已包含：版本化 API、健康检查、结构化日志、请求限制、优雅停机、PostgreSQL 连接池与事务、内部文件读取、Casdoor 登录 / 注册入口、持久化会话、账户页、注销、自动测试和 CI。
 
-作品发布/审核/下载与临时操作页面已接入同一后端。新增功能的完整安装、私有 S3 与 ClamAV 配置、权限初始化、API、额度及升级说明见 [作品平台说明](docs/workshop.md)；真实游戏格式与校验边界见 [包格式核对](docs/package-format.md)，验证命令和结果见 [验证记录](docs/verification-part1.md)。临时页面入口 `/projects`，业务 API `/api/v1/projects`。以下原有 `make up` 说明仍启动基础账户服务；完整作品上传环境使用新说明中的 `make workshop-init` / `make workshop-up`。
+作品发布/审核/下载与临时操作页面已接入同一后端。新增功能的完整安装、私有 S3 与 ClamAV 配置、权限初始化、API、额度及升级说明见 [作品平台说明](docs/workshop.md)；真实游戏格式与校验边界见 [包格式核对](docs/package-format.md)，验证命令和结果见 [验证记录](docs/verification-part1.md)。临时页面入口 `/projects`，业务 API `/api/v1/projects`。 评论评分、私密反馈附件、举报申诉及管理统计见 [社区说明](docs/community.md)；临时入口 `/community`，真实模型接入状态与验收结果见 [第二部分验证](docs/verification-part2.md)。以下原有 `make up` 说明仍启动基础账户服务；完整作品上传环境使用新说明中的 `make workshop-init` / `make workshop-up`。
 
 
 ## 本地 Casdoor 和账户系统

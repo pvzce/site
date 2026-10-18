@@ -19,16 +19,18 @@ var (
 	ErrNotFound    = errors.New("resource not found")
 	ErrInvalid     = errors.New("invalid input or transition")
 	ErrConflict    = errors.New("resource or upload already exists")
+	ErrRateLimited = errors.New("too many community actions; try again later")
 	ErrQuota       = errors.New("daily upload quota exceeded")
 	ErrTooLarge    = errors.New("file exceeds configured size limit")
 	ErrUnavailable = errors.New("required upload service unavailable")
 )
 
 type Service struct {
-	DB       *database.DB
-	Settings Settings
-	Objects  ObjectStore
-	Scanner  Scanner
+	DB        *database.DB
+	Settings  Settings
+	Objects   ObjectStore
+	Scanner   Scanner
+	Moderator Decider
 }
 
 func New(ctx context.Context, db *database.DB, s Settings) (*Service, error) {
@@ -36,6 +38,11 @@ func New(ctx context.Context, db *database.DB, s Settings) (*Service, error) {
 		return nil, err
 	}
 	svc := &Service{DB: db, Settings: s, Scanner: Clamd{Address: s.ScannerAddress}}
+	moderator, e := ConfiguredDecider()
+	if e != nil {
+		return nil, e
+	}
+	svc.Moderator = moderator
 	if s.Endpoint != "" {
 		if len(s.HashKey) < 32 {
 			return nil, fmt.Errorf("DOWNLOAD_HASH_KEY must contain at least 32 bytes")
@@ -60,7 +67,7 @@ func Status(err error) int {
 		return 409
 	case errors.Is(err, ErrTooLarge):
 		return 413
-	case errors.Is(err, ErrQuota):
+	case errors.Is(err, ErrQuota), errors.Is(err, ErrRateLimited):
 		return 429
 	case errors.Is(err, ErrUnavailable):
 		return 503
@@ -76,20 +83,29 @@ type Actor struct {
 	Role        string `json:"role"`
 }
 
-func (s *Service) actor(ctx context.Context, tx pgx.Tx, uid int64) (Actor, error) {
+func (s *Service) identity(ctx context.Context, tx pgx.Tx, uid int64) (Actor, error) {
 	var a Actor
+	if uid <= 0 {
+		return a, ErrForbidden
+	}
 	if _, e := tx.Exec(ctx, `INSERT INTO pvzce_site.accounts(user_id) VALUES($1) ON CONFLICT DO NOTHING`, uid); e != nil {
 		return a, e
 	}
 	e := tx.QueryRow(ctx, `SELECT user_id,display_name,bio,status,role FROM pvzce_site.accounts WHERE user_id=$1 FOR SHARE`, uid).Scan(&a.ID, &a.DisplayName, &a.Bio, &a.Status, &a.Role)
+
+	return a, e
+}
+func (s *Service) actor(ctx context.Context, tx pgx.Tx, uid int64) (Actor, error) {
+	a, e := s.identity(ctx, tx, uid)
 	if e == nil && a.Status != "active" {
 		return a, ErrForbidden
 	}
 	return a, e
 }
+func isStaff(a Actor) bool { return a.Status == "active" && oneOf(a.Role, "reviewer", "admin") }
 func (s *Service) Profile(ctx context.Context, uid int64) (Actor, error) {
 	var a Actor
-	e := s.DB.InTx(ctx, func(ctx context.Context, tx pgx.Tx) error { var e error; a, e = s.actor(ctx, tx, uid); return e })
+	e := s.DB.InTx(ctx, func(ctx context.Context, tx pgx.Tx) error { var e error; a, e = s.identity(ctx, tx, uid); return e })
 	return a, e
 }
 func (s *Service) EditProfile(ctx context.Context, uid int64, name, bio string) error {
@@ -116,29 +132,39 @@ func (s *Service) ManageAccount(ctx context.Context, uid, target int64, role, st
 		return ErrInvalid
 	}
 	return s.DB.InTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		// Serialize role assignments with bootstrap and avoid last-admin removal.
-		if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(706879122532)`); e != nil {
-			return e
-		}
-		a, e := s.actor(ctx, tx, uid)
-		if e != nil {
-			return e
-		}
-		if a.Role != "admin" {
-			return ErrForbidden
-		}
-		if _, e = tx.Exec(ctx, `INSERT INTO pvzce_site.accounts(user_id) VALUES($1) ON CONFLICT DO NOTHING`, target); e != nil {
-			return e
-		}
-		tag, e := tx.Exec(ctx, `UPDATE pvzce_site.accounts SET role=$2,status=$3,updated_at=now() WHERE user_id=$1`, target, role, status)
-		if e != nil {
-			return e
-		}
-		if tag.RowsAffected() != 1 {
-			return ErrNotFound
-		}
-		return audit(ctx, tx, uid, "account.manage", fmt.Sprint(target), reason+"; role="+role+"; status="+status)
+		return s.manageAccountTx(ctx, tx, uid, target, role, status, reason)
 	})
+}
+func (s *Service) manageAccountTx(ctx context.Context, tx pgx.Tx, uid, target int64, role, status, reason string) error {
+	if uid == target || !oneOf(role, "user", "reviewer", "admin") || !oneOf(status, "active", "restricted") || !reasonOK(reason) {
+		return ErrInvalid
+	}
+
+	// Serialize role assignments with bootstrap and avoid last-admin removal.
+	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(706879122532)`); e != nil {
+		return e
+	}
+	a, e := s.actor(ctx, tx, uid)
+	if e != nil {
+		return e
+	}
+	if a.Role != "admin" {
+		return ErrForbidden
+	}
+	if _, e = tx.Exec(ctx, `INSERT INTO pvzce_site.accounts(user_id) VALUES($1) ON CONFLICT DO NOTHING`, target); e != nil {
+		return e
+	}
+	tag, e := tx.Exec(ctx, `UPDATE pvzce_site.accounts SET role=$2,status=$3,updated_at=now() WHERE user_id=$1`, target, role, status)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	if e := refreshUserRatings(ctx, tx, target); e != nil {
+		return e
+	}
+	return audit(ctx, tx, uid, "account.manage", fmt.Sprint(target), reason+"; role="+role+"; status="+status)
 }
 
 // BootstrapAdmin is a local operator command, not an HTTP endpoint. It requires an existing verified OIDC account.
