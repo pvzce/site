@@ -24,6 +24,7 @@ type Config struct {
 	Database          Database
 	Files             Files
 	Auth              Auth
+	GameLogin         GameLogin
 }
 
 type Database struct {
@@ -59,8 +60,9 @@ func Default() Config {
 			ConnectTimeout: 5 * time.Second, QueryTimeout: 3 * time.Second,
 			MaxConnLifetime: time.Hour, MaxConnIdleTime: 5 * time.Minute,
 		},
-		Files: Files{DataDir: "./data", ConfigDir: "./configs", CacheDir: "./cache", MaxBytes: 16 << 20},
-		Auth:  defaultAuth(),
+		Files:     Files{DataDir: "./data", ConfigDir: "./configs", CacheDir: "./cache", MaxBytes: 16 << 20},
+		Auth:      defaultAuth(),
+		GameLogin: GameLogin{CodeTTL: 60 * time.Second, SessionTTL: time.Hour},
 	}
 }
 
@@ -151,6 +153,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Auth.Enabled && cfg.Database.URL == "" {
 		return Config{}, fmt.Errorf("authentication requires DATABASE_URL or DB_HOST")
+	}
+	if err := loadGameLogin(&cfg); err != nil {
+		return Config{}, err
 	}
 	return cfg, nil
 }

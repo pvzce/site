@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ func clearEnvironment(t *testing.T) {
 		"DATA_DIR", "CONFIG_DIR", "CACHE_DIR",
 		"AUTH_ENABLED", "CASDOOR_ISSUER_URL", "CASDOOR_INTERNAL_URL", "CASDOOR_APPLICATION",
 		"CASDOOR_CLIENT_ID", "CASDOOR_CLIENT_SECRET", "APP_PUBLIC_URL", "AUTH_SESSION_TTL",
+		"GAME_LOGIN_ENABLED", "GAME_LOGIN_VERSIONS", "GAME_LOGIN_CODE_TTL", "GAME_LOGIN_SESSION_TTL", "GAME_LOGIN_ALLOW_LOCAL_HTTP",
 	} {
 		t.Setenv(name, "")
 	}
@@ -28,7 +30,7 @@ func clearEnvironment(t *testing.T) {
 func TestLoadConfiguration(t *testing.T) {
 	clearEnvironment(t)
 	cfg, err := Load()
-	if err != nil || cfg != Default() {
+	if err != nil || !reflect.DeepEqual(cfg, Default()) {
 		t.Fatalf("defaults: cfg=%+v err=%v", cfg, err)
 	}
 	t.Setenv("APP_ENV", "production")

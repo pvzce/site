@@ -10,17 +10,19 @@ import (
 	"pvzce-site/internal/config"
 	"pvzce-site/internal/database"
 	"pvzce-site/internal/fileio"
+	"pvzce-site/internal/gamelogin"
 	"pvzce-site/internal/workshop"
 )
 
 // Dependencies are initialized once at startup and shared by business handlers.
 // Files is an internal reader and is not exposed through a download route.
 type Dependencies struct {
-	Database *database.DB
-	Files    *fileio.Directories
-	Ready    func(context.Context) error
-	Auth     *auth.Service
-	Workshop *workshop.Service
+	Database  *database.DB
+	Files     *fileio.Directories
+	Ready     func(context.Context) error
+	Auth      *auth.Service
+	Workshop  *workshop.Service
+	GameLogin *gamelogin.Service
 }
 
 // NewHandler is the composition point for HTTP routes and shared middleware.
@@ -28,6 +30,7 @@ func NewHandler(cfg config.Config, logger *slog.Logger, deps Dependencies) http.
 	mux := http.NewServeMux()
 	registerAccountRoutes(mux, deps.Auth, logger)
 	registerWorkshop(mux, deps)
+	registerGameLogin(mux, deps)
 	info := func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]string{

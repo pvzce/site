@@ -367,3 +367,5 @@ go test -run '^$' -bench BenchmarkInfo -benchmem ./internal/httpapi
 `tests/casdoor_e2e.py` 使用本地 `demo` 账户验证真实 Casdoor 授权码、本站 Cookie、账户接口、回调重放防护和注销，不输出密码或令牌。测试账户改密后，可通过 `CASDOOR_E2E_PASSWORD` 指定新的密码。
 
 基准测试用于观察处理器耗时与内存分配，包含测试用响应记录器的开销，不能当作部署后的 QPS。实际吞吐量取决于服务器资源、业务逻辑、数据库和日志量，应在业务接口完成后进行并发压测。
+
+PVZCE 启动登录交接 v1 后端（默认关闭）的接口、迁移、配置及真实部署验收见 [docs/game-login.md](docs/game-login.md)。后端实现不表示当前游戏已接入或端到端登录可用。
