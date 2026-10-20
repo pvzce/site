@@ -22,7 +22,7 @@ test:
 check: vet test
 
 integration:
-	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a test database'; exit 1; }; $(GO) test -race ./internal/database ./internal/server ./internal/auth ./internal/migrate ./internal/workshop
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a test database'; exit 1; }; $(GO) test -race ./internal/database ./internal/server ./internal/auth ./internal/migrate ./internal/workshop ./internal/gamelogin ./internal/httpapi
 
 docker-build:
 	docker build --build-arg VERSION=$(VERSION) -t pvzce-site:$(VERSION) .

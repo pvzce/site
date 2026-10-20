@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -39,7 +40,7 @@ func middleware(logger *slog.Logger, maxBodyBytes int64, next http.Handler) http
 				level = slog.LevelError
 			}
 			logger.Log(r.Context(), level, "http request", "request_id", id,
-				"method", r.Method, "path", r.URL.Path, "status", status,
+				"method", r.Method, "path", logPath(r.URL.Path), "status", status,
 				"bytes", tracked.bytes, "duration_ms", float64(time.Since(started).Microseconds())/1000)
 		}()
 		defer func() {
@@ -47,8 +48,12 @@ func middleware(logger *slog.Logger, maxBodyBytes int64, next http.Handler) http
 				if value == http.ErrAbortHandler {
 					panic(value)
 				}
-				logger.ErrorContext(r.Context(), "handler panic", "request_id", id,
-					"panic", value, "stack", string(debug.Stack()))
+				if sensitiveGamePath(r.URL.Path) {
+					logger.ErrorContext(r.Context(), "handler panic", "request_id", id, "stack", string(debug.Stack()))
+				} else {
+					logger.ErrorContext(r.Context(), "handler panic", "request_id", id,
+						"panic", value, "stack", string(debug.Stack()))
+				}
 				if tracked.status != 0 {
 					// A response already sent cannot be replaced with a JSON error.
 					panic(http.ErrAbortHandler)
@@ -64,6 +69,21 @@ func middleware(logger *slog.Logger, maxBodyBytes int64, next http.Handler) http
 		r.Body = http.MaxBytesReader(tracked, r.Body, maxBodyBytes)
 		next.ServeHTTP(tracked, r)
 	})
+}
+
+func sensitiveGamePath(path string) bool {
+	return strings.HasPrefix(path, "/api/v1/game/") || strings.HasPrefix(path, "/api/v1/launcher/")
+}
+func logPath(path string) string {
+	if sensitiveGamePath(path) {
+		switch path {
+		case "/api/v1/launcher/capabilities", "/api/v1/launcher/login-codes", "/api/v1/game/login-code/exchange", "/api/v1/game/session", "/api/v1/game/logout":
+			return path
+		default:
+			return "/api/v1/game/[redacted]"
+		}
+	}
+	return path
 }
 
 type responseWriter struct {

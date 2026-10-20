@@ -14,6 +14,7 @@ import (
 	"pvzce-site/internal/config"
 	"pvzce-site/internal/database"
 	"pvzce-site/internal/fileio"
+	"pvzce-site/internal/gamelogin"
 	"pvzce-site/internal/healthcheck"
 	"pvzce-site/internal/httpapi"
 	"pvzce-site/internal/migrate"
@@ -121,5 +122,12 @@ func run() error {
 	if works != nil {
 		go works.Maintenance(ctx, logger)
 	}
-	return server.New(cfg, logger, httpapi.Dependencies{Database: db, Files: files, Auth: accounts, Workshop: works}).Run(ctx)
+	var game *gamelogin.Service
+	if cfg.GameLogin.Enabled {
+		game, err = gamelogin.New(ctx, db, cfg.GameLogin)
+		if err != nil {
+			return fmt.Errorf("initialize game login: %w", err)
+		}
+	}
+	return server.New(cfg, logger, httpapi.Dependencies{Database: db, Files: files, Auth: accounts, Workshop: works, GameLogin: game}).Run(ctx)
 }
